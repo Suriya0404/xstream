@@ -1,0 +1,47 @@
+mysql:
+  host: mysql
+  port: 3306
+  user: root
+  password: xstream123
+  database: xstream
+
+kafka:
+  bootstrap_servers: kafka:29092
+  schema_registry_url: http://schema-registry:8081
+
+scylladb:
+  contact_points:
+    - scylladb
+  port: 9042
+  keyspace: xstream
+  username: ""
+  password: ""
+
+clickhouse:
+  host: clickhouse
+  port: 9000
+  http_port: 8123
+  database: xstream
+  user: default
+  password: ""
+
+flink:
+  jobmanager_url: http://flink-jobmanager:8081
+  sql_gateway_url: http://flink-jobmanager:8083
+  parallelism: 1
+  checkpointing_interval_ms: 10000
+
+anthropic:
+  api_key: ""  # Set via ANTHROPIC_API_KEY env var in docker-compose
+
+finnhub:
+  api_key: ""  # Set via FINNHUB_API_KEY env var in docker-compose
+  symbols:
+    - AAPL
+    - MSFT
+    - BINANCE:BTCUSDT
+  topics:
+    trades: finnhub-trades
+    quotes: finnhub-quotes
+    enriched: finnhub-enriched
+  quote_poll_interval_s: 10

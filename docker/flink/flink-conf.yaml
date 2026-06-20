@@ -1,0 +1,21 @@
+jobmanager.rpc.address: flink-jobmanager
+jobmanager.rpc.port: 6123
+jobmanager.memory.process.size: 1600m
+taskmanager.memory.process.size: 1728m
+taskmanager.numberOfTaskSlots: 4
+parallelism.default: 1
+
+# Checkpointing
+execution.checkpointing.interval: 10000
+execution.checkpointing.mode: EXACTLY_ONCE
+state.backend: filesystem
+state.checkpoints.dir: file:///opt/flink/checkpoints
+
+# SQL Gateway
+sql-gateway.endpoint.rest.address: 0.0.0.0
+sql-gateway.endpoint.rest.port: 8083
+
+# Restart strategy
+restart-strategy: fixed-delay
+restart-strategy.fixed-delay.attempts: 3
+restart-strategy.fixed-delay.delay: 10s

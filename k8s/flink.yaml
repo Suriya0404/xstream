@@ -1,0 +1,71 @@
+---
+# Flink Job Manager
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-jobmanager
+  namespace: xstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: flink-jobmanager }
+  template:
+    metadata:
+      labels: { app: flink-jobmanager }
+    spec:
+      containers:
+        - name: flink-jobmanager
+          image: xstream/flink:latest   # built from docker/flink/Dockerfile
+          command: ["/docker-entrypoint.sh", "jobmanager"]
+          ports:
+            - { containerPort: 8081, name: ui }
+            - { containerPort: 8083, name: sql-gw }
+            - { containerPort: 6123, name: rpc }
+          env:
+            - name: FLINK_PROPERTIES
+              value: |
+                jobmanager.rpc.address: flink-jobmanager
+                sql-gateway.endpoint.rest.address: 0.0.0.0
+                sql-gateway.endpoint.rest.port: 8083
+          resources:
+            requests: { memory: "1Gi", cpu: "500m" }
+            limits:   { memory: "2Gi", cpu: "1" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-jobmanager
+  namespace: xstream
+spec:
+  selector: { app: flink-jobmanager }
+  ports:
+    - { name: ui,     port: 8081 }
+    - { name: sql-gw, port: 8083 }
+    - { name: rpc,    port: 6123 }
+---
+# Flink Task Manager
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-taskmanager
+  namespace: xstream
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: flink-taskmanager }
+  template:
+    metadata:
+      labels: { app: flink-taskmanager }
+    spec:
+      containers:
+        - name: flink-taskmanager
+          image: xstream/flink:latest
+          command: ["/docker-entrypoint.sh", "taskmanager"]
+          env:
+            - name: FLINK_PROPERTIES
+              value: |
+                jobmanager.rpc.address: flink-jobmanager
+                taskmanager.numberOfTaskSlots: 4
+          resources:
+            requests: { memory: "1.5Gi", cpu: "500m" }
+            limits:   { memory: "2Gi",   cpu: "2" }

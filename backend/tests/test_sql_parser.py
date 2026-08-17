@@ -64,7 +64,10 @@ def test_kafka_ddl_escapes_single_quotes():
     assert "'topic' = 'my''topic'" in sql
 
 
-# ── generate_flink_sql — ScyllaDB ─────────────────────────────────────────────
+# ── generate_flink_sql — ScyllaDB / ClickHouse are native sinks, not Flink ───
+# Neither connector exists for Flink ('cassandra' has no SQL factory, 'jdbc' ships no
+# ClickHouse dialect) — see clickhouse_sink.py / scylla_sink_config.py for how these are
+# actually provisioned. generate_flink_sql() must emit no DDL/DML for them.
 
 _SCYLLA_NODE = {
     "id": "s1",
@@ -78,22 +81,6 @@ _SCYLLA_NODE = {
     },
 }
 
-def test_scylla_ddl_contains_cassandra_connector():
-    sql = generate_flink_sql(_SCYLLA_NODE, [], {"s1": _SCYLLA_NODE}, _GLOBAL_CFG)
-    assert "'connector' = 'cassandra'" in sql
-    assert "PRIMARY KEY" in sql
-
-
-def test_scylla_generates_insert_from_kafka():
-    nodes = {"k1": _KAFKA_NODE, "s1": _SCYLLA_NODE}
-    edges = [{"id": "e1", "source_id": "k1", "target_id": "s1"}]
-    sql = generate_flink_sql(_SCYLLA_NODE, edges, nodes, _GLOBAL_CFG)
-    assert "INSERT INTO" in sql
-    assert "`scylla-sink`" in sql
-
-
-# ── generate_flink_sql — ClickHouse ──────────────────────────────────────────
-
 _CH_NODE = {
     "id": "c1",
     "node_type": "clickhouse",
@@ -106,10 +93,18 @@ _CH_NODE = {
     },
 }
 
-def test_clickhouse_ddl_contains_jdbc_connector():
-    sql = generate_flink_sql(_CH_NODE, [], {"c1": _CH_NODE}, _GLOBAL_CFG)
-    assert "'connector' = 'jdbc'" in sql
-    assert "ClickHouseDriver" in sql
+@pytest.mark.parametrize("node", [_SCYLLA_NODE, _CH_NODE])
+def test_native_sink_emits_no_flink_ddl(node):
+    sql = generate_flink_sql(node, [], {node["id"]: node}, _GLOBAL_CFG)
+    assert "CREATE TABLE" not in sql
+    assert "INSERT INTO" not in sql
+
+
+def test_native_sink_ignores_upstream_kafka_for_flink_sql():
+    nodes = {"k1": _KAFKA_NODE, "s1": _SCYLLA_NODE}
+    edges = [{"id": "e1", "source_id": "k1", "target_id": "s1"}]
+    sql = generate_flink_sql(_SCYLLA_NODE, edges, nodes, _GLOBAL_CFG)
+    assert "INSERT INTO" not in sql
 
 
 # ── SQL injection prevention ───────────────────────────────────────────────────

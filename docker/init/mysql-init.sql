@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS pipelines (
 CREATE TABLE IF NOT EXISTS nodes (
   id            VARCHAR(64)        PRIMARY KEY,
   pipeline_id   INT                NOT NULL,
-  node_type     ENUM('kafka','scylladb','clickhouse') NOT NULL,
+  node_type     ENUM('kafka','scylladb','clickhouse','mongodb') NOT NULL,
   label         VARCHAR(255)       NOT NULL,
   pos_x         FLOAT              NOT NULL DEFAULT 0,
   pos_y         FLOAT              NOT NULL DEFAULT 0,
@@ -40,6 +40,17 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
   started_at    DATETIME,
   finished_at   DATETIME,
   FOREIGN KEY (pipeline_id) REFERENCES pipelines(id)
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_run_logs (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  run_id        INT                NOT NULL,
+  node_id       VARCHAR(64),
+  node_label    VARCHAR(255),
+  level         ENUM('DEBUG','INFO','WARNING','ERROR') DEFAULT 'INFO',
+  message       TEXT               NOT NULL,
+  timestamp     DATETIME           DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (run_id) REFERENCES pipeline_runs(id) ON DELETE CASCADE
 );
 
 INSERT INTO pipelines (name, description) VALUES ('default', 'Default pipeline');

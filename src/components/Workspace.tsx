@@ -17,15 +17,17 @@ import { NodeEditContext } from '../context/NodeEditContext';
 import SaveDialog from './SaveDialog';
 import ChatAgent from './ChatAgent';
 import { useAutoSave } from '../hooks/useAutoSave';
-import { usePipelineRun } from '../hooks/usePipelineRun';
-import type { RunStatus } from '../hooks/usePipelineRun';
+import { usePipelineRun, SUMMARY_TAB } from '../hooks/usePipelineRun';
+import type { RunStatus, NodeStatus } from '../hooks/usePipelineRun';
+import { useFlinkHeartbeat } from '../hooks/useFlinkHeartbeat';
+import { FlinkHealthContext } from '../context/FlinkHealthContext';
 
 const BACKEND = 'http://localhost:8000';
 
 const nodeTypes = { turbo: TurboNode };
 const edgeTypes  = { turbo: TurboEdge };
 
-const SINK_TYPES = new Set(['scylladb', 'clickhouse']);
+const SINK_TYPES = new Set(['scylladb', 'clickhouse', 'mongodb']);
 
 /** Extract the numeric index from a handle id like 'out-3' or 'in-0'. */
 const parseHandleIdx = (handle: string | null | undefined): number => {
@@ -49,8 +51,9 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
   const [pipelineName, setPipelineName] = useState(initialPipelineName);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
+  const [saveResult, setSaveResult] = useState<{ jobCount: number; error?: string } | null>(null);
   const [activePanel, setActivePanel] = useState<{ id: string; data: EditableNodeData; connectedSources: ConnectedSource[] } | null>(null);
-  const logBodyRef = useRef<HTMLPreElement>(null);
+  const logBodyRef = useRef<HTMLDivElement>(null);
   const loadedRef  = useRef(false);
   const justLoadedRef = useRef(false);
 
@@ -93,7 +96,7 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
       return false;
     }
     try {
-      await fetch(`${BACKEND}/api/pipeline`, {
+      const res = await fetch(`${BACKEND}/api/pipeline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -102,8 +105,17 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
           edges: edges.map(edgePayload),
         }),
       });
+      const json = await res.json();
+      setSaveResult({
+        jobCount: (json.job_files ?? []).length,
+        error: json.artifact_error ?? undefined,
+      });
+      // Clear the badge after 4 seconds
+      setTimeout(() => setSaveResult(null), 4000);
       return true;
     } catch (err) {
+      setSaveResult({ jobCount: 0, error: String(err) });
+      setTimeout(() => setSaveResult(null), 4000);
       return false;
     }
   }, [pipelineName, nodes, edges, nodePayload, edgePayload]);
@@ -115,20 +127,25 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
 
   // ── Pipeline run + polling ─────────────────────────────
   const {
-    runStatus, setRunStatus,
-    runLog, setRunLog,
+    runStatus,
     showLog, setShowLog,
     logCollapsed, setLogCollapsed,
+    summary, summaryLog, nodeLogs,
+    openTabs, activeTab, setActiveTab,
+    openNodeTab, closeNodeTab,
     runPipeline,
     stopPipeline,
   } = usePipelineRun({ pipelineName, savePipeline });
+
+  // ── Flink job heartbeat (drives the per-node status dot) ──
+  const flinkHealth = useFlinkHeartbeat(pipelineName);
 
   // Auto-scroll log pane when content arrives
   useEffect(() => {
     if (logBodyRef.current && showLog && !logCollapsed) {
       logBodyRef.current.scrollTop = logBodyRef.current.scrollHeight;
     }
-  }, [runLog, showLog, logCollapsed]);
+  }, [nodeLogs, summaryLog, activeTab, showLog, logCollapsed]);
 
   // ── Backend health check ───────────────────────────────
   useEffect(() => {
@@ -335,8 +352,13 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
     success: 'Run ✓', failed: 'Failed — Retry', cancelled: 'Run Pipeline',
   };
 
+  const NODE_STATUS_COLOR: Record<NodeStatus, string> = {
+    pending: '#888', running: '#ff9800', success: '#4caf50', failed: '#e92a67',
+  };
+
   return (
     <NodeEditContext.Provider value={{ openPanel }}>
+    <FlinkHealthContext.Provider value={flinkHealth}>
       {showSaveDialog && (
         <SaveDialog
           initialName={pipelineName || 'My Workflow'}
@@ -393,11 +415,11 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
                 <div className="toolbar">
                   <div className="toolbar-group">
                     <span className="toolbar-label">Add</span>
-                    {(['kafka', 'scylladb', 'clickhouse'] as const).map(t => (
+                    {(['kafka', 'scylladb', 'clickhouse', 'mongodb'] as const).map(t => (
                       <button
                         key={t}
                         className="toolbar-btn"
-                        style={{ background: { kafka: '#e92a67', scylladb: '#2a8af6', clickhouse: '#f6a82a' }[t] }}
+                        style={{ background: { kafka: '#e92a67', scylladb: '#2a8af6', clickhouse: '#f6a82a', mongodb: '#13aa52' }[t] }}
                         onClick={() => addNode(t)}
                       >
                         + {t}
@@ -413,9 +435,16 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
               {/* Right toolbar */}
               <Panel position="top-right">
                 <div className="toolbar">
-                  {autoSaved && <span className="toolbar-autosaved">✓ saved</span>}
+                  {autoSaved && !saveResult && <span className="toolbar-autosaved">✓ saved</span>}
+                  {saveResult && (
+                    <span className={`toolbar-autosaved${saveResult.error ? ' save-error' : ''}`}>
+                      {saveResult.error
+                        ? `⚠ jobs error: ${saveResult.error.slice(0, 60)}`
+                        : `✓ saved · ${saveResult.jobCount} job${saveResult.jobCount !== 1 ? 's' : ''} generated`}
+                    </span>
+                  )}
                   {!backendOnline && <span className="toolbar-offline">backend offline</span>}
-                  <button className="toolbar-btn" onClick={() => savePipeline()} disabled={runStatus === 'running'}>
+                  <button className="toolbar-btn" onClick={() => savePipeline()}>
                     <FiSave size={13} /> Save
                   </button>
                   {runStatus === 'running' && (
@@ -497,6 +526,21 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
                 {runStatus === 'cancelled' && <FiSquare size={12} color="#ff9800" style={{ marginLeft: 6 }} />}
               </span>
               <div className="log-bottom-actions" onClick={e => e.stopPropagation()}>
+                {/* Node picker — opens a per-node log tab */}
+                <select
+                  className="log-node-select"
+                  value=""
+                  onChange={e => {
+                    const node = nodes.find(n => n.id === e.target.value);
+                    if (node) openNodeTab(node.id, node.data.title);
+                  }}
+                  title="Open a node's logs in a new tab"
+                >
+                  <option value="" disabled>+ Node logs…</option>
+                  {nodes.map(n => (
+                    <option key={n.id} value={n.id}>{n.data.title}</option>
+                  ))}
+                </select>
                 <button
                   className="log-bottom-btn"
                   onClick={() => setLogCollapsed(v => !v)}
@@ -513,10 +557,73 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
                 </button>
               </div>
             </div>
+
             {!logCollapsed && (
-              <pre ref={logBodyRef} className="log-bottom-body">
-                {runLog || '(no output yet)'}
-              </pre>
+              <>
+                {/* Tab strip */}
+                <div className="log-tabs" onClick={e => e.stopPropagation()}>
+                  <button
+                    className={`log-tab${activeTab === SUMMARY_TAB ? ' active' : ''}`}
+                    onClick={() => setActiveTab(SUMMARY_TAB)}
+                  >
+                    Summary
+                  </button>
+                  {openTabs.map(t => (
+                    <button
+                      key={t.id}
+                      className={`log-tab${activeTab === t.id ? ' active' : ''}`}
+                      onClick={() => setActiveTab(t.id)}
+                    >
+                      {t.label}
+                      <span
+                        className="log-tab-close"
+                        onClick={e => { e.stopPropagation(); closeNodeTab(t.id); }}
+                      >×</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div ref={logBodyRef} className="log-bottom-body">
+                  {activeTab === SUMMARY_TAB ? (
+                    <div className="log-summary">
+                      {summary.length === 0 && !summaryLog && '(no output yet)'}
+                      {summary.map(n => (
+                        <div key={n.node_id} className="log-summary-row">
+                          <span
+                            className="log-summary-dot"
+                            style={{ background: NODE_STATUS_COLOR[n.status] }}
+                          />
+                          <button
+                            className="log-summary-name"
+                            onClick={() => openNodeTab(n.node_id, n.node_label)}
+                            title="Open this node's logs"
+                          >
+                            {n.node_label}
+                          </button>
+                          <span className="log-summary-type">{n.node_type}</span>
+                          <span
+                            className="log-summary-status"
+                            style={{ color: NODE_STATUS_COLOR[n.status] }}
+                          >
+                            {n.status}
+                          </span>
+                          <span className="log-summary-msg">
+                            {n.error_count > 0 ? `⚠ ${n.error_count} error(s) · ` : ''}
+                            {n.last_message ?? '—'}
+                          </span>
+                        </div>
+                      ))}
+                      {summaryLog && (
+                        <pre className="log-summary-pipeline">{summaryLog}</pre>
+                      )}
+                    </div>
+                  ) : (
+                    <pre className="log-node-body">
+                      {nodeLogs[activeTab] || '(no logs for this node yet)'}
+                    </pre>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -532,6 +639,7 @@ export default function Workspace({ initialPipelineName, onHome }: Props) {
         setEdges={setEdges}
         pipelineName={pipelineName}
       />
+    </FlinkHealthContext.Provider>
     </NodeEditContext.Provider>
   );
 }

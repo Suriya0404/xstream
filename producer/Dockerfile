@@ -5,6 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY log_setup.py .
+COPY metrics.py .
 COPY finnhub_producer.py .
 COPY scylla_consumer.py .
 

@@ -9,6 +9,7 @@ pydantic==2.7.3
 python-multipart==0.0.9
 anthropic==0.103.1
 sqlparse==0.5.1
+cassandra-driver==3.29.2
 structlog==24.2.0
 prometheus-fastapi-instrumentator==6.1.0
 pytest==8.2.2

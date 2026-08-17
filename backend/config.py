@@ -13,6 +13,7 @@ _ENV_OVERRIDES: list[tuple[str, str, str]] = [
     ("SCYLLADB_PASSWORD",   "scylladb",   "password"),
     ("CLICKHOUSE_USER",     "clickhouse", "user"),
     ("CLICKHOUSE_PASSWORD", "clickhouse", "password"),
+    ("MONGODB_URI",         "mongodb",    "uri"),
     ("JOBS_REPO_PATH",      "jobs_repo",  "path"),
 ]
 

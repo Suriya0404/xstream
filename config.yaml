@@ -25,6 +25,10 @@ clickhouse:
   user: default
   password: ""
 
+mongodb:
+  uri: mongodb://localhost:27017  # Override with MONGODB_URI env var
+  database: xstream
+
 flink:
   jobmanager_url: http://localhost:8082
   sql_gateway_url: http://localhost:8083
@@ -43,7 +47,7 @@ jobs_repo:
   path: ../x-stream-jobs  # relative to project root; override with JOBS_REPO_PATH env var
 
 finnhub:
-  api_key: ""  # Override with FINNHUB_API_KEY env var in production
+  api_key: "d85vgp9r01qmuqqbo44gd85vgp9r01qmuqqbo450"  # Override with FINNHUB_API_KEY env var in production
   symbols:
     - AAPL
     - MSFT

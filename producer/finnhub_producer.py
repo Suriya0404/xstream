@@ -44,7 +44,7 @@ with open(CONFIG_PATH) as f:
 fh_cfg  = cfg["finnhub"]
 kfk_cfg = cfg["kafka"]
 
-API_KEY        = fh_cfg["api_key"]
+API_KEY        = os.getenv("FINNHUB_API_KEY") or fh_cfg["api_key"]
 SYMBOLS        = fh_cfg["symbols"]
 TOPIC_TRADES   = fh_cfg["topics"]["trades"]
 TOPIC_QUOTES   = fh_cfg["topics"]["quotes"]

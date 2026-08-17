@@ -159,6 +159,30 @@ body {
   position: relative;
 }
 
+/* ── Flink job heartbeat dot ──────────────────────────── */
+/* Sits in the top-right corner, vertically level with the node-type pill. */
+.react-flow__node-turbo .node-health-dot {
+  position: absolute;
+  top: 23px;
+  right: 16px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  z-index: 2;
+  border: 2px solid var(--bg-color);
+  pointer-events: auto;
+}
+
+.react-flow__node-turbo .node-health-dot.healthy {
+  background: #22d97a;
+  box-shadow: 0 0 4px 1px rgba(34, 217, 122, 0.7);
+}
+
+.react-flow__node-turbo .node-health-dot.unhealthy {
+  background: #ff3b5c;
+  box-shadow: 0 0 4px 1px rgba(255, 59, 92, 0.7);
+}
+
 /* ── Field-level handle dots ─────────────────────────── */
 /* Handles are rendered outside .wrapper (no overflow:hidden clipping).
    Position (top/transform) is controlled via inline style for per-field accuracy.
@@ -488,6 +512,15 @@ input[type=text] {
   animation: fadeOut 2.5s ease-out forwards;
 }
 
+.toolbar-autosaved.save-error {
+  color: #f6a82a;
+  animation: none;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @keyframes fadeOut {
   0%   { opacity: 1; }
   60%  { opacity: 1; }
@@ -649,6 +682,141 @@ input[type=text] {
   font-size: 12px;
   line-height: 1.6;
   color: #b0c4b8;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Log node picker ─────────────────────────────────── */
+.log-node-select {
+  background: rgb(28, 28, 28);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-ui);
+  padding: 3px 6px;
+  margin-right: 6px;
+  cursor: pointer;
+  max-width: 140px;
+}
+
+/* ── Log tabs ────────────────────────────────────────── */
+.log-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 8px;
+  height: 30px;
+  min-height: 30px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(13, 13, 13);
+  overflow-x: auto;
+}
+
+.log-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 0 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.log-tab:hover { color: var(--text-color); }
+
+.log-tab.active {
+  color: var(--text-color);
+  border-bottom-color: #2a8af6;
+}
+
+.log-tab-close {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.log-tab-close:hover { color: #e92a67; background: rgba(255,255,255,0.08); }
+
+/* ── Summary view ────────────────────────────────────── */
+.log-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 2px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.log-summary-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.log-summary-name {
+  background: none;
+  border: none;
+  color: var(--text-color);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline dotted;
+  min-width: 120px;
+  text-align: left;
+}
+.log-summary-name:hover { color: #2a8af6; }
+
+.log-summary-type {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  min-width: 70px;
+}
+
+.log-summary-status {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 64px;
+}
+
+.log-summary-msg {
+  color: var(--text-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-summary-pipeline {
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  color: #8aa;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-node-body {
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
 }

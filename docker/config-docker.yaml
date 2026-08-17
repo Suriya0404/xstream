@@ -25,6 +25,10 @@ clickhouse:
   user: default
   password: ""
 
+mongodb:
+  uri: mongodb://mongo:27017
+  database: xstream
+
 flink:
   jobmanager_url: http://flink-jobmanager:8081
   sql_gateway_url: http://flink-jobmanager:8083

@@ -12,6 +12,7 @@ volumes:
   mysql-data:
   clickhouse-data:
   flink-checkpoints:
+  mongo-data:
 
 services:
 
@@ -121,6 +122,9 @@ services:
     build:
       context: ./flink
       dockerfile: Dockerfile
+    # amd64: apache-flink (PyFlink) publishes no arm64 wheel, so run x86_64 (emulated
+    # on Apple Silicon) where the manylinux wheel installs.
+    platform: linux/amd64
     container_name: xstream-flink-jobmanager
     restart: unless-stopped
     ports:
@@ -148,6 +152,7 @@ services:
     build:
       context: ./flink
       dockerfile: Dockerfile
+    platform: linux/amd64  # match jobmanager (PyFlink amd64 wheel)
     container_name: xstream-flink-taskmanager
     restart: unless-stopped
     depends_on:
@@ -186,6 +191,23 @@ services:
       timeout: 5s
       retries: 10
 
+  # ── MongoDB (Flink sink target) ───────────────────────
+  mongo:
+    image: mongo:7
+    container_name: xstream-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - xstream-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   # ── x-stream Backend API ──────────────────────────────
   backend:
     build:
@@ -199,9 +221,11 @@ services:
       CONFIG_PATH: /app/config.yaml
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       JOBS_REPO_PATH: /jobs
+      FLINK_DOCKER_CONTAINER: xstream-flink-jobmanager
     volumes:
       - ./config-docker.yaml:/app/config.yaml:ro
       - ../../x-stream-jobs:/jobs  # generated Flink jobs and workflow YAMLs
+      - /var/run/docker.sock:/var/run/docker.sock  # to launch Flink jobs via flink_job_control.py
     depends_on:
       mysql:
         condition: service_healthy
@@ -217,6 +241,7 @@ services:
     restart: unless-stopped
     environment:
       CONFIG_PATH: /app/config.yaml
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
     volumes:
       - ./config-docker.yaml:/app/config.yaml:ro
     depends_on:
@@ -235,8 +260,10 @@ services:
     command: ["python", "-u", "scylla_consumer.py"]
     environment:
       CONFIG_PATH: /app/config.yaml
+      JOBS_REPO_PATH: /jobs
     volumes:
       - ./config-docker.yaml:/app/config.yaml:ro
+      - ../../x-stream-jobs:/jobs
     depends_on:
       kafka:
         condition: service_healthy

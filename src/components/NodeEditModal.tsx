@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { FiX, FiSave, FiCode, FiSettings } from 'react-icons/fi';
 import type { TurboNodeData } from './TurboNode';
 
-export type NodeType = 'kafka' | 'scylladb' | 'clickhouse';
+export type NodeType = 'kafka' | 'scylladb' | 'clickhouse' | 'mongodb';
 
 export interface NodeProperties {
   // Kafka
@@ -17,6 +17,9 @@ export interface NodeProperties {
   host?: string;
   // ClickHouse
   database?: string;
+  // MongoDB
+  uri?: string;
+  collection?: string;
   // Primary key fields (scylladb / clickhouse) — supports composite keys
   primary_key?: string[];
   // Field-to-field mappings: index → { source_node_id, source_field }
@@ -50,15 +53,17 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   kafka: 'Kafka Topic',
   scylladb: 'ScyllaDB',
   clickhouse: 'ClickHouse',
+  mongodb: 'MongoDB',
 };
 
 const NODE_TYPE_COLOR: Record<NodeType, string> = {
   kafka: '#e92a67',
   scylladb: '#2a8af6',
   clickhouse: '#f6a82a',
+  mongodb: '#13aa52',
 };
 
-const SINK_TYPES: NodeType[] = ['scylladb', 'clickhouse'];
+const SINK_TYPES: NodeType[] = ['scylladb', 'clickhouse', 'mongodb'];
 
 function PropertiesPanel({ nodeType, props, handles, connectedSources, onChange }: {
   nodeType: NodeType;
@@ -171,6 +176,15 @@ function PropertiesPanel({ nodeType, props, handles, connectedSources, onChange 
       {field('Host', 'host', 'localhost')}
       {field('Database', 'database', 'xstream')}
       {field('Table Name', 'table', 'my_table')}
+      {fieldMappings}
+    </>
+  );
+
+  if (nodeType === 'mongodb') return (
+    <>
+      {field('URI', 'uri', 'mongodb://mongo:27017')}
+      {field('Database', 'database', 'xstream')}
+      {field('Collection', 'collection', 'my_collection')}
       {fieldMappings}
     </>
   );
@@ -383,5 +397,18 @@ const SQL_PLACEHOLDER: Record<NodeType, string> = {
   'connector'  = 'jdbc',
   'url'        = 'jdbc:clickhouse://clickhouse:9000/xstream',
   'table-name' = 'reports'
+);`,
+
+  mongodb: `CREATE TABLE merged_orders (
+  order_id    STRING,
+  customer_id STRING,
+  amount      DOUBLE,
+  name        STRING,
+  PRIMARY KEY (order_id) NOT ENFORCED
+) WITH (
+  'connector'  = 'mongodb',
+  'uri'        = 'mongodb://mongo:27017',
+  'database'   = 'xstream',
+  'collection' = 'merged_orders'
 );`,
 };

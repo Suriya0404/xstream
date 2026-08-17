@@ -5,6 +5,7 @@ import type { NodeProps } from 'reactflow';
 import { FiEdit, FiPlus, FiTrash2 } from 'react-icons/fi';
 import type { NodeType } from './NodeEditModal';
 import { useNodeEdit } from '../context/NodeEditContext';
+import { useFlinkHealth } from '../context/FlinkHealthContext';
 
 export type TurboNodeData = {
   title: string;
@@ -20,11 +21,13 @@ const NODE_TYPE_ACCENT: Record<string, string> = {
   kafka:      '#e92a67',
   scylladb:   '#2a8af6',
   clickhouse: '#f6a82a',
+  mongodb:    '#13aa52',
 };
 
 export default memo(({ id, data }: NodeProps<TurboNodeData>) => {
   const { setNodes, setEdges } = useReactFlow();
   const { openPanel } = useNodeEdit();
+  const health = useFlinkHealth();
   const fieldsRef = useRef<HTMLDivElement>(null);
   const [handleTops, setHandleTops] = useState<number[]>([]);
 
@@ -157,6 +160,14 @@ export default memo(({ id, data }: NodeProps<TurboNodeData>) => {
           />
         </Fragment>
       ))}
+
+      {/* Flink job heartbeat indicator */}
+      {health !== 'unknown' && (
+        <div
+          className={`node-health-dot ${health}`}
+          title={health === 'healthy' ? 'Flink job running' : 'Flink job not healthy'}
+        />
+      )}
 
       {/* Edit badge */}
       <div

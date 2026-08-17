@@ -33,18 +33,40 @@ class FlinkSQLGateway:
 
     # ── Statement execution ───────────────────────────────
     async def execute(self, sql: str, timeout_s: float = 120.0) -> dict:
-        session = await self.get_or_create_session()
-        async with httpx.AsyncClient(base_url=self.base, timeout=60) as client:
-            r = await client.post(
-                f"/v1/sessions/{session}/statements",
-                json={"statement": sql},
-            )
-            r.raise_for_status()
-            op_handle = r.json()["operationHandle"]
+        # Retry once on session-level errors (404/500) by resetting the cached session.
+        # This handles SQL Gateway restarts where _session_id has become stale.
+        submit_r: httpx.Response | None = None
+        for attempt in range(2):
+            session = await self.get_or_create_session()
+            async with httpx.AsyncClient(base_url=self.base, timeout=60) as client:
+                submit_r = await client.post(
+                    f"/v1/sessions/{session}/statements",
+                    json={"statement": sql},
+                )
+                if submit_r.status_code in (404, 500) and attempt == 0:
+                    log.warning(
+                        "SQL Gateway session error (status=%s); resetting session and retrying. Body: %s",
+                        submit_r.status_code,
+                        submit_r.text[:500],
+                    )
+                    self._session_id = None
+                    continue
+                break
 
+        if submit_r is None or submit_r.status_code >= 400:
+            body = submit_r.text if submit_r is not None else "no response"
+            raise RuntimeError(
+                f"SQL Gateway {submit_r.status_code if submit_r else '?'} submitting statement"
+                f":\n{sql[:300]}\n\n{body}"
+            )
+
+        op_handle = submit_r.json()["operationHandle"]
+
+        async with httpx.AsyncClient(base_url=self.base, timeout=60) as client:
             # Poll with exponential backoff: start at 0.5s, cap at 5s
             elapsed = 0.0
             delay = 0.5
+            status = "RUNNING"
             while elapsed < timeout_s:
                 status_r = await client.get(
                     f"/v1/sessions/{session}/operations/{op_handle}/status"
@@ -61,7 +83,13 @@ class FlinkSQLGateway:
             result_r = await client.get(
                 f"/v1/sessions/{session}/operations/{op_handle}/result/0"
             )
-            return result_r.json()
+            data = result_r.json()
+
+            if status == "ERROR" or result_r.status_code >= 400 or "errors" in data:
+                detail = data.get("errors", [str(data)])[0] if isinstance(data, dict) else str(data)
+                raise RuntimeError(f"SQL Gateway error executing statement:\n{sql[:300]}\n\n{detail}")
+
+            return data
 
     async def run_pipeline_sql(self, full_sql: str) -> str:
         """Split multi-statement SQL and execute each; returns last job id if any."""

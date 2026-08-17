@@ -13,7 +13,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 import config as cfg
 import models
-from database import engine
+from database import engine, ensure_schema_migrations
 from flink_runner import FlinkSQLGateway, FlinkJobManager
 from api.routes import health, pipelines, chat
 
@@ -39,12 +39,27 @@ async def lifespan(app: FastAPI):
     app.state.job_manager = FlinkJobManager(
         flink_cfg.get("jobmanager_url", "http://localhost:8081")
     )
+    # create_all, migrations, and seeding are isolated so a failure in one never
+    # skips the others. In particular create_all can raise a benign 1050
+    # ("table already exists") when multiple workers race on first boot — that must
+    # not prevent ensure_schema_migrations() from adding later-added columns.
     try:
-        models.Base.metadata.create_all(bind=engine)
+        models.Base.metadata.create_all(bind=engine, checkfirst=True)
         log.info("db_tables_ready")
-        _seed_sample_if_empty()
     except Exception as exc:
-        log.warning("mysql_not_reachable_at_startup", error=str(exc))
+        log.warning("create_all_failed", error=str(exc))
+
+    try:
+        ensure_schema_migrations()
+    except Exception as exc:
+        log.warning("schema_migration_failed", error=str(exc))
+
+    try:
+        _seed_sample_if_empty()
+        _seed_demo_pipeline_if_missing()
+        _seed_mongo_demo_if_missing()
+    except Exception as exc:
+        log.warning("seed_failed", error=str(exc))
     yield
 
 
@@ -130,6 +145,116 @@ def _seed_sample_if_empty() -> None:
         log.info("Seeded 'Sample Workflow'")
     except Exception as exc:
         log.warning("Could not seed sample workflow: %s", exc)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _seed_demo_pipeline_if_missing() -> None:
+    """One-off migration of the old hardcoded finnhub-enriched -> finnhub_merged consumer
+    flow into a real pipeline definition (finnhub is just a test workflow here — any other
+    workflow gets created through the UI). Running it once hands scylla_sink_config.py the
+    routing config the now-generic scylla-consumer container needs — same schema the
+    consumer used to have baked in."""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        if db.query(models.Pipeline).filter_by(name="Finnhub Live").first():
+            return
+        pipeline = models.Pipeline(name="Finnhub Live")
+        db.add(pipeline)
+        db.commit()
+        db.refresh(pipeline)
+
+        finnhub_fields = [
+            ["symbol", "STRING"], ["price", "DOUBLE"], ["volume", "DOUBLE"],
+            ["quote_current", "DOUBLE"], ["quote_high", "DOUBLE"], ["quote_low", "DOUBLE"],
+            ["pct_change", "DOUBLE"], ["timestamp", "BIGINT"],
+        ]
+        nodes = [
+            models.Node(id="fh1", pipeline_id=pipeline.id, node_type="kafka",
+                        label="kafka-finnhub-enriched", pos_x=0, pos_y=0,
+                        properties={"topic": "finnhub-enriched", "format": "json",
+                                    "_handles": finnhub_fields}),
+            models.Node(id="fh2", pipeline_id=pipeline.id, node_type="scylladb",
+                        label="scylla-finnhub-merged", pos_x=600, pos_y=0,
+                        properties={"keyspace": "xstream", "table": "finnhub_merged",
+                                    "primary_key": ["symbol"], "_handles": finnhub_fields}),
+        ]
+        for n in nodes:
+            db.add(n)
+
+        db.add(models.Edge(id="fhe1", pipeline_id=pipeline.id, source_id="fh1", target_id="fh2",
+                            source_handle="out-0", target_handle="in-0"))
+
+        db.commit()
+        log.info("Seeded 'Finnhub Live' pipeline")
+    except Exception as exc:
+        log.warning("Could not seed Finnhub Live pipeline: %s", exc)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _seed_mongo_demo_if_missing() -> None:
+    """Seed a 'Finnhub Mongo' pipeline: two Kafka sources merged by symbol into a
+    MongoDB sink. This is the pipeline compiled to a runnable PyFlink StatementSet
+    job and launched via `flink run -py` (kafka-trades fills price/volume,
+    kafka-enriched fills the quote_* columns — merged per symbol)."""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        if db.query(models.Pipeline).filter_by(name="Finnhub Mongo").first():
+            return
+        pipeline = models.Pipeline(name="Finnhub Mongo")
+        db.add(pipeline)
+        db.commit()
+        db.refresh(pipeline)
+
+        merged_fields = [
+            ["symbol", "STRING"], ["price", "DOUBLE"], ["volume", "DOUBLE"],
+            ["quote_current", "DOUBLE"], ["quote_high", "DOUBLE"], ["quote_low", "DOUBLE"],
+            ["pct_change", "DOUBLE"], ["timestamp", "BIGINT"],
+        ]
+        trades_fields = [
+            ["symbol", "STRING"], ["price", "DOUBLE"], ["volume", "DOUBLE"], ["timestamp", "BIGINT"],
+        ]
+        nodes = [
+            models.Node(id="fm_enriched", pipeline_id=pipeline.id, node_type="kafka",
+                        label="kafka-enriched", pos_x=0, pos_y=0,
+                        properties={"topic": "finnhub-enriched", "format": "json",
+                                    "_handles": merged_fields}),
+            models.Node(id="fm_trades", pipeline_id=pipeline.id, node_type="kafka",
+                        label="kafka-trades", pos_x=0, pos_y=300,
+                        properties={"topic": "finnhub-trades", "format": "json",
+                                    "_handles": trades_fields}),
+            models.Node(id="fm_mongo", pipeline_id=pipeline.id, node_type="mongodb",
+                        label="mongo-merge", pos_x=600, pos_y=150,
+                        properties={"database": "xstream", "collection": "finnhub_merged",
+                                    "primary_key": ["symbol"], "_handles": merged_fields,
+                                    "field_mappings": {
+                                        "0": {"source_node_id": "fm_enriched", "source_field": "symbol"},
+                                        "1": {"source_node_id": "fm_trades", "source_field": "price"},
+                                        "2": {"source_node_id": "fm_trades", "source_field": "volume"},
+                                        "3": {"source_node_id": "fm_enriched", "source_field": "quote_current"},
+                                        "4": {"source_node_id": "fm_enriched", "source_field": "quote_high"},
+                                        "5": {"source_node_id": "fm_enriched", "source_field": "quote_low"},
+                                        "6": {"source_node_id": "fm_enriched", "source_field": "pct_change"},
+                                        "7": {"source_node_id": "fm_enriched", "source_field": "timestamp"},
+                                    }}),
+        ]
+        for n in nodes:
+            db.add(n)
+
+        db.add(models.Edge(id="fme1", pipeline_id=pipeline.id, source_id="fm_enriched",
+                           target_id="fm_mongo", source_handle="out-0", target_handle="in-0"))
+        db.add(models.Edge(id="fme2", pipeline_id=pipeline.id, source_id="fm_trades",
+                           target_id="fm_mongo", source_handle="out-0", target_handle="in-1"))
+
+        db.commit()
+        log.info("Seeded 'Finnhub Mongo' pipeline")
+    except Exception as exc:
+        log.warning("Could not seed Finnhub Mongo pipeline: %s", exc)
         db.rollback()
     finally:
         db.close()

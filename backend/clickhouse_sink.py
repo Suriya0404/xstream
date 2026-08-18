@@ -122,8 +122,16 @@ async def apply_clickhouse_sink(
     sink_fields = _fields_for_node(node)
     pk_raw = props.get("primary_key") or []
     pk_fields = pk_raw if isinstance(pk_raw, list) and pk_raw else [sink_fields[0].name]
+    pk_set = set(pk_fields)
     order_by = ", ".join(f"`{p}`" for p in pk_fields)
-    sink_col_defs = ", ".join(f"`{f.name}` Nullable({_ch_type(f.data_type)})" for f in sink_fields)
+    # ORDER BY / sorting-key columns must NOT be Nullable (MergeTree rejects a
+    # nullable key unless allow_nullable_key); everything else stays Nullable so
+    # multi-source merges can leave columns unset.
+    sink_col_defs = ", ".join(
+        f"`{f.name}` {_ch_type(f.data_type)}" if f.name in pk_set
+        else f"`{f.name}` Nullable({_ch_type(f.data_type)})"
+        for f in sink_fields
+    )
 
     unique_sources = upstream_kafka_sources(node["id"], edges, all_nodes)
 

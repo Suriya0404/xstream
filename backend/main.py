@@ -58,6 +58,7 @@ async def lifespan(app: FastAPI):
         _seed_sample_if_empty()
         _seed_demo_pipeline_if_missing()
         _seed_mongo_demo_if_missing()
+        _seed_mongo_ch_demo_if_missing()
     except Exception as exc:
         log.warning("seed_failed", error=str(exc))
     yield
@@ -256,5 +257,87 @@ def _seed_mongo_demo_if_missing() -> None:
     except Exception as exc:
         log.warning("Could not seed Finnhub Mongo pipeline: %s", exc)
         db.rollback()
+    finally:
+        db.close()
+
+
+def _seed_mongo_ch_demo_if_missing() -> None:
+    """Seed a 'Finnhub Mongo CH' pipeline: two Kafka topics merged by symbol into a
+    MongoDB sink AND into a ClickHouse table. The Kafka sources + MongoDB sink compile
+    into one runnable Flink StatementSet job (launched via `flink run -py`); the
+    ClickHouse node is fed by its native Kafka-engine + materialized-view path
+    (apply_clickhouse_sink), which traces back through the mongo node to the same two
+    Kafka topics. So both stores receive the merged per-symbol data."""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        if db.query(models.Pipeline).filter_by(name="Finnhub Mongo CH").first():
+            return
+        pipeline = models.Pipeline(name="Finnhub Mongo CH")
+        db.add(pipeline)
+        db.commit()
+        db.refresh(pipeline)
+
+        merged_fields = [
+            ["symbol", "STRING"], ["price", "DOUBLE"], ["volume", "DOUBLE"],
+            ["quote_current", "DOUBLE"], ["quote_high", "DOUBLE"], ["quote_low", "DOUBLE"],
+            ["pct_change", "DOUBLE"], ["timestamp", "BIGINT"],
+        ]
+        trades_fields = [
+            ["symbol", "STRING"], ["price", "DOUBLE"], ["volume", "DOUBLE"], ["timestamp", "BIGINT"],
+        ]
+        mongo_mappings = {
+            "0": {"source_node_id": "fmc_enriched", "source_field": "symbol"},
+            "1": {"source_node_id": "fmc_trades", "source_field": "price"},
+            "2": {"source_node_id": "fmc_trades", "source_field": "volume"},
+            "3": {"source_node_id": "fmc_enriched", "source_field": "quote_current"},
+            "4": {"source_node_id": "fmc_enriched", "source_field": "quote_high"},
+            "5": {"source_node_id": "fmc_enriched", "source_field": "quote_low"},
+            "6": {"source_node_id": "fmc_enriched", "source_field": "pct_change"},
+            "7": {"source_node_id": "fmc_enriched", "source_field": "timestamp"},
+        }
+        nodes = [
+            models.Node(id="fmc_enriched", pipeline_id=pipeline.id, node_type="kafka",
+                        label="kafka-enriched", pos_x=0, pos_y=0,
+                        properties={"topic": "finnhub-enriched", "format": "json",
+                                    "_handles": merged_fields}),
+            models.Node(id="fmc_trades", pipeline_id=pipeline.id, node_type="kafka",
+                        label="kafka-trades", pos_x=0, pos_y=300,
+                        properties={"topic": "finnhub-trades", "format": "json",
+                                    "_handles": trades_fields}),
+            models.Node(id="fmc_mongo", pipeline_id=pipeline.id, node_type="mongodb",
+                        label="mongo-merge", pos_x=600, pos_y=150,
+                        properties={"database": "xstream", "collection": "finnhub_merged_ch",
+                                    "primary_key": ["symbol"], "_handles": merged_fields,
+                                    "field_mappings": mongo_mappings}),
+            models.Node(id="fmc_ch", pipeline_id=pipeline.id, node_type="clickhouse",
+                        label="ch-analytics", pos_x=1200, pos_y=150,
+                        properties={"database": "xstream", "table": "finnhub_analytics_mongo",
+                                    "primary_key": ["symbol"], "_handles": merged_fields}),
+        ]
+        for n in nodes:
+            db.add(n)
+
+        db.add(models.Edge(id="fmce1", pipeline_id=pipeline.id, source_id="fmc_enriched",
+                           target_id="fmc_mongo", source_handle="out-0", target_handle="in-0"))
+        db.add(models.Edge(id="fmce2", pipeline_id=pipeline.id, source_id="fmc_trades",
+                           target_id="fmc_mongo", source_handle="out-0", target_handle="in-1"))
+        db.add(models.Edge(id="fmce3", pipeline_id=pipeline.id, source_id="fmc_mongo",
+                           target_id="fmc_ch", source_handle="out-0", target_handle="in-0"))
+
+        db.commit()
+        log.info("Seeded 'Finnhub Mongo CH' pipeline")
+    except Exception as exc:
+        # Another uvicorn worker likely seeded concurrently (duplicate PK). Roll back
+        # and drop the empty pipeline row this worker created, so no orphan remains.
+        log.warning("Could not seed Finnhub Mongo CH pipeline: %s", exc)
+        db.rollback()
+        try:
+            for orphan in db.query(models.Pipeline).filter_by(name="Finnhub Mongo CH").all():
+                if db.query(models.Node).filter_by(pipeline_id=orphan.id).count() == 0:
+                    db.delete(orphan)
+            db.commit()
+        except Exception:
+            db.rollback()
     finally:
         db.close()
